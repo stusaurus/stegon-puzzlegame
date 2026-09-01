@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f5efd9" />
+  <title>ステゴン くるりんパズル</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="app" aria-live="polite">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">ステゴンのパズル</p>
+        <h1>くるりんパズル</h1>
+      </div>
+      <div class="stegon-badge" aria-label="ステゴン">ステゴン</div>
+    </header>
+
+    <section class="status-card">
+      <div class="status-item"><span>ステージ</span><strong id="stageNumber">1</strong></div>
+      <div class="status-item"><span>のこり</span><strong id="movesLeft">0手</strong></div>
+      <div class="status-item"><span>れんさ</span><strong id="chainCount">0</strong></div>
+    </section>
+
+    <section class="goal-card">
+      <span class="goal-label">もくひょう</span>
+      <strong id="goalText"></strong>
+      <div class="progress" aria-hidden="true"><div id="goalBar"></div></div>
+    </section>
+
+    <section class="game-area">
+      <div id="board" class="board" role="grid" aria-label="パズル盤面"></div>
+      <p id="message" class="message">パネルをタップすると、上下左右もくるりん！</p>
+    </section>
+
+    <section class="controls">
+      <button id="restartButton" class="button secondary" type="button">やりなおす</button>
+      <button id="nextButton" class="button primary" type="button" disabled>つぎへ</button>
+    </section>
+  </main>
+
+  <script src="stages.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
