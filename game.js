@@ -38,6 +38,7 @@
     nextButton.disabled = true;
     messageEl.className = "message";
     messageEl.textContent = "パネルをタップすると、上下左右もくるりん！";
+    chainCountEl.textContent = "0";
     render();
   }
 
@@ -54,12 +55,12 @@
       const tile = document.createElement("button");
       tile.className = "tile";
       tile.type = "button";
-      tile.dataset.type = type;
+      tile.dataset.type = type || "empty";
       tile.dataset.index = String(index);
       tile.setAttribute("role", "gridcell");
-      tile.setAttribute("aria-label", type === "grass" ? "草パネル" : "木の実パネル");
-      tile.textContent = ICONS[type];
-      tile.disabled = busy || cleared;
+      tile.setAttribute("aria-label", type === "grass" ? "草パネル" : type === "berry" ? "木の実パネル" : "空きマス");
+      tile.textContent = type ? ICONS[type] : "";
+      tile.disabled = busy || cleared || !type;
       tile.addEventListener("click", () => handleMove(index));
       boardEl.appendChild(tile);
     });
@@ -82,27 +83,52 @@
     chainCountEl.textContent = "0";
 
     const affected = neighbors(index);
-    document.querySelectorAll(".tile").forEach((tile, i) => {
+    const tiles = [...document.querySelectorAll(".tile")];
+    tiles.forEach((tile, i) => {
       tile.disabled = true;
-      if (affected.includes(i)) tile.classList.add("flipping");
+      if (affected.includes(i)) {
+        tile.style.transform = "scale(1.06)";
+        tile.style.boxShadow = "0 0 0 4px rgba(255, 210, 73, .78), inset 0 -5px 0 rgba(0,0,0,.08)";
+      }
+    });
+
+    await sleep(180);
+    tiles.forEach((tile, i) => {
+      if (affected.includes(i)) {
+        tile.style.transform = "";
+        tile.style.boxShadow = "";
+        tile.classList.add("flipping");
+      }
     });
     await sleep(130);
 
     affected.forEach(i => { board[i] = FLIP[board[i]]; });
     render();
-    await sleep(100);
+    await sleep(130);
 
     let chain = 0;
     while (true) {
       const matches = findMatches();
       if (matches.size === 0) break;
+
       chain += 1;
       chainCountEl.textContent = String(chain);
       messageEl.textContent = chain === 1 ? "けせた！" : `${chain}れんさ！`;
       await clearMatches(matches);
-      collapseAndRefill();
+
+      // 連鎖中は新しいパネルを補充しない。
+      // 盤面に残ったパネルが落下して揃ったときだけ次の連鎖になる。
+      collapseBoard();
       render();
-      await sleep(180);
+      await sleep(190);
+    }
+
+    // 連鎖が完全に終わってから補充する。
+    // 補充パネルだけで偶然3つ揃わないように安全な面を選ぶ。
+    if (board.some(value => value === null)) {
+      refillSafely();
+      render();
+      await sleep(120);
     }
 
     if (checkClear()) {
@@ -126,28 +152,38 @@
     const matches = new Set();
 
     for (let r = 0; r < size; r += 1) {
-      let start = 0;
-      for (let c = 1; c <= size; c += 1) {
-        const same = c < size && board[r * size + c] === board[r * size + start];
-        if (!same) {
-          if (c - start >= 3) {
-            for (let x = start; x < c; x += 1) matches.add(r * size + x);
-          }
-          start = c;
+      let c = 0;
+      while (c < size) {
+        const type = board[r * size + c];
+        if (!type) {
+          c += 1;
+          continue;
         }
+
+        let end = c + 1;
+        while (end < size && board[r * size + end] === type) end += 1;
+        if (end - c >= 3) {
+          for (let x = c; x < end; x += 1) matches.add(r * size + x);
+        }
+        c = end;
       }
     }
 
     for (let c = 0; c < size; c += 1) {
-      let start = 0;
-      for (let r = 1; r <= size; r += 1) {
-        const same = r < size && board[r * size + c] === board[start * size + c];
-        if (!same) {
-          if (r - start >= 3) {
-            for (let y = start; y < r; y += 1) matches.add(y * size + c);
-          }
-          start = r;
+      let r = 0;
+      while (r < size) {
+        const type = board[r * size + c];
+        if (!type) {
+          r += 1;
+          continue;
         }
+
+        let end = r + 1;
+        while (end < size && board[end * size + c] === type) end += 1;
+        if (end - r >= 3) {
+          for (let y = r; y < end; y += 1) matches.add(y * size + c);
+        }
+        r = end;
       }
     }
 
@@ -158,7 +194,8 @@
     document.querySelectorAll(".tile").forEach((tile, index) => {
       if (matches.has(index)) tile.classList.add("clearing");
     });
-    await sleep(170);
+    await sleep(180);
+
     matches.forEach(index => {
       const type = board[index];
       if (type) collected[type] += 1;
@@ -166,19 +203,63 @@
     });
   }
 
-  function collapseAndRefill() {
+  function collapseBoard() {
     const size = stage.size;
+
     for (let c = 0; c < size; c += 1) {
-      const column = [];
+      const remaining = [];
       for (let r = size - 1; r >= 0; r -= 1) {
         const value = board[r * size + c];
-        if (value) column.push(value);
+        if (value) remaining.push(value);
       }
-      while (column.length < size) column.push(nextRefill());
-      for (let r = size - 1, i = 0; r >= 0; r -= 1, i += 1) {
-        board[r * size + c] = column[i];
+
+      for (let r = 0; r < size; r += 1) board[r * size + c] = null;
+      remaining.forEach((value, offset) => {
+        const row = size - 1 - offset;
+        board[row * size + c] = value;
+      });
+    }
+  }
+
+  function refillSafely() {
+    const size = stage.size;
+
+    for (let c = 0; c < size; c += 1) {
+      for (let r = size - 1; r >= 0; r -= 1) {
+        const index = r * size + c;
+        if (board[index] !== null) continue;
+
+        const preferred = nextRefill();
+        const alternate = FLIP[preferred];
+
+        if (!wouldCreateMatch(index, preferred)) {
+          board[index] = preferred;
+        } else if (!wouldCreateMatch(index, alternate)) {
+          board[index] = alternate;
+        } else {
+          board[index] = preferred;
+        }
       }
     }
+  }
+
+  function wouldCreateMatch(index, type) {
+    const size = stage.size;
+    const row = Math.floor(index / size);
+    const col = index % size;
+    const previous = board[index];
+    board[index] = type;
+
+    let horizontal = 1;
+    for (let c = col - 1; c >= 0 && board[row * size + c] === type; c -= 1) horizontal += 1;
+    for (let c = col + 1; c < size && board[row * size + c] === type; c += 1) horizontal += 1;
+
+    let vertical = 1;
+    for (let r = row - 1; r >= 0 && board[r * size + col] === type; r -= 1) vertical += 1;
+    for (let r = row + 1; r < size && board[r * size + col] === type; r += 1) vertical += 1;
+
+    board[index] = previous;
+    return horizontal >= 3 || vertical >= 3;
   }
 
   function nextRefill() {
@@ -187,7 +268,10 @@
       refillIndex += 1;
       return value;
     }
-    return TYPES[refillIndex++ % TYPES.length];
+
+    const value = TYPES[refillIndex % TYPES.length];
+    refillIndex += 1;
+    return value;
   }
 
   function checkClear() {
