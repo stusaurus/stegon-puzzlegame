@@ -3,6 +3,8 @@ window.STEGON_STAGES = [
     id: 1,
     size: 3,
     maxMoves: 6,
+    difficulty: 1,
+    mechanics: [],
     goal: { type: "collect", tile: "grass", count: 6 },
     initialBoard: [
       "berry", "berry", "grass",
@@ -15,6 +17,8 @@ window.STEGON_STAGES = [
     id: 2,
     size: 4,
     maxMoves: 8,
+    difficulty: 2,
+    mechanics: [],
     goal: { type: "collect", tile: "berry", count: 14 },
     initialBoard: [
       "grass", "berry", "grass", "berry",
@@ -28,6 +32,8 @@ window.STEGON_STAGES = [
     id: 3,
     size: 5,
     maxMoves: 10,
+    difficulty: 3,
+    mechanics: [],
     goal: { type: "collect", tile: "grass", count: 28 },
     initialBoard: [
       "grass", "grass", "berry", "grass", "berry",
