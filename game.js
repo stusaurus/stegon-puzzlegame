@@ -11,9 +11,8 @@
     settle: 35,
     matchHold: 300,
     countHold: 280,
-    countClear: 180,
-    countGap: 45,
-    otherClear: 300,
+    countGap: 70,
+    groupClear: 340,
     afterClear: 130,
     drop: 320,
     refill: 340
@@ -293,27 +292,17 @@
     tile._countBadge.removeAttribute("data-type");
   }
 
-  async function clearTargetTile(index, nextCount) {
+  async function countTargetTile(index, nextCount) {
     const tile = elements.board.children[index];
     const type = state.board[index];
     if (!tile || !type) return;
 
-    tile.classList.remove("match-ready");
     tile._countBadge.textContent = String(nextCount);
     tile._countBadge.dataset.type = type;
     tile.classList.add("counting");
     await sleep(prefersReducedMotion ? 100 : TIMING.countHold);
-
     tile.classList.remove("counting");
-    tile.classList.add("clearing", "target-clear");
-    await sleep(prefersReducedMotion ? 90 : TIMING.countClear);
-
-    state.collected[type] += 1;
-    state.board[index] = null;
-    paintGoal();
     resetCountBadge(tile);
-    tile.classList.remove("clearing", "target-clear");
-    paintTile(index);
     await sleep(prefersReducedMotion ? 20 : TIMING.countGap);
   }
 
@@ -321,7 +310,6 @@
     const ordered = [...matches].sort((a, b) => a - b);
     const goalType = state.stage.goal.tile;
     const targetIndices = ordered.filter(index => state.board[index] === goalType);
-    const otherIndices = ordered.filter(index => state.board[index] !== goalType);
 
     ordered.forEach(index => {
       const tile = elements.board.children[index];
@@ -329,40 +317,36 @@
     });
     await sleep(prefersReducedMotion ? 100 : TIMING.matchHold);
 
+    // Count the goal-color tiles one by one, but keep the whole matched set
+    // physically on the board until counting is finished. This preserves the
+    // visible 3+-in-a-row rule throughout the counting animation.
     for (const index of targetIndices) {
       moveTargetCount += 1;
-      await clearTargetTile(index, moveTargetCount);
+      await countTargetTile(index, moveTargetCount);
     }
 
-    const otherTiles = otherIndices
+    const matchedTiles = ordered
       .map(index => elements.board.children[index])
       .filter(Boolean);
 
-    otherTiles.forEach(tile => {
-      tile.classList.remove("match-ready");
-      tile.classList.add("clearing", "non-target-clear");
+    matchedTiles.forEach(tile => {
+      tile.classList.remove("match-ready", "counting");
+      tile.classList.add("clearing");
     });
 
-    if (otherTiles.length) {
-      await sleep(prefersReducedMotion ? 120 : TIMING.otherClear);
-      otherIndices.forEach(index => {
-        const type = state.board[index];
-        if (type) state.collected[type] += 1;
-        state.board[index] = null;
-        const tile = elements.board.children[index];
-        if (tile) {
-          tile.classList.remove("clearing", "non-target-clear");
-          resetCountBadge(tile);
-          paintTile(index);
-        }
-      });
-    }
+    await sleep(prefersReducedMotion ? 130 : TIMING.groupClear);
 
+    // Only now does the matched group leave the logical board, all at once.
     ordered.forEach(index => {
+      const type = state.board[index];
+      if (type) state.collected[type] += 1;
+      state.board[index] = null;
       const tile = elements.board.children[index];
-      if (tile) tile.classList.remove("match-ready");
+      if (tile) resetCountBadge(tile);
     });
 
+    paintGoal();
+    paintBoard();
     clearMotionClasses();
     await sleep(prefersReducedMotion ? 35 : TIMING.afterClear);
     return moveTargetCount;
