@@ -9,25 +9,20 @@
     reducedFlip: 220,
     neighborDelay: 55,
     settle: 35,
-    matchHold: 170,
-    clear: 330,
-    afterClear: 65,
-    drop: 285,
-    refill: 300
+    matchHold: 240,
+    countStep: 165,
+    otherStep: 90,
+    clear: 420,
+    afterClear: 110,
+    drop: 300,
+    refill: 320
   };
 
   const $ = id => document.getElementById(id);
   const elements = {
-    board: $("board"),
-    stage: $("stageNumber"),
-    moves: $("movesLeft"),
-    chain: $("chainCount"),
-    goal: $("goalText"),
-    goalBar: $("goalBar"),
-    message: $("message"),
-    callout: $("chainCallout"),
-    restart: $("restartButton"),
-    next: $("nextButton")
+    board: $("board"), stage: $("stageNumber"), moves: $("movesLeft"), chain: $("chainCount"),
+    goal: $("goalText"), goalBar: $("goalBar"), message: $("message"), callout: $("chainCallout"),
+    restart: $("restartButton"), next: $("nextButton")
   };
 
   const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
@@ -87,12 +82,17 @@
       front.className = "tile-face tile-front";
       const back = document.createElement("span");
       back.className = "tile-face tile-back";
+      const countBadge = document.createElement("span");
+      countBadge.className = "tile-count";
+      countBadge.setAttribute("aria-hidden", "true");
+
       card.append(front, back);
-      tile.appendChild(card);
+      tile.append(card, countBadge);
 
       tile._card = card;
       tile._frontFace = front;
       tile._backFace = back;
+      tile._countBadge = countBadge;
       tile._flipped = false;
       tile.addEventListener("click", () => handleMove(index));
       elements.board.appendChild(tile);
@@ -102,6 +102,13 @@
   function paintFace(face, type) {
     face.dataset.type = type || "empty";
     face.textContent = type ? ICONS[type] : "";
+  }
+
+  function paintGoal() {
+    const { stage, collected } = state;
+    const count = collected[stage.goal.tile] || 0;
+    elements.goal.textContent = `${ICONS[stage.goal.tile]}を ${stage.goal.count}こ あつめよう（${Math.min(count, stage.goal.count)}/${stage.goal.count}）`;
+    elements.goalBar.style.width = `${Math.min(100, count / stage.goal.count * 100)}%`;
   }
 
   function paintTile(index) {
@@ -131,12 +138,10 @@
   }
 
   function paintBoard() {
-    const { stage, movesUsed, collected } = state;
+    const { stage, movesUsed } = state;
     elements.stage.textContent = stage.id;
     elements.moves.textContent = `${Math.max(0, stage.maxMoves - movesUsed)}手`;
-    const count = collected[stage.goal.tile] || 0;
-    elements.goal.textContent = `${ICONS[stage.goal.tile]}を ${stage.goal.count}こ あつめよう（${Math.min(count, stage.goal.count)}/${stage.goal.count}）`;
-    elements.goalBar.style.width = `${Math.min(100, count / stage.goal.count * 100)}%`;
+    paintGoal();
     for (let index = 0; index < state.board.length; index += 1) paintTile(index);
   }
 
@@ -215,18 +220,19 @@
     await animateFlip(neighbors(index), index);
 
     let chain = 0;
+    let moveTargetCount = 0;
     while (true) {
       const matches = findMatches();
       if (!matches.size) break;
 
       chain += 1;
       showChain(chain);
-      await clearMatches(matches);
+      moveTargetCount = await clearMatches(matches, moveTargetCount);
 
       const drops = collapseBoard();
       paintBoard();
       animateDrops(drops, chain);
-      await sleep(Math.max(195, TIMING.drop - chain * 14));
+      await sleep(Math.max(225, TIMING.drop - chain * 10));
       clearMotionClasses();
     }
 
@@ -234,19 +240,23 @@
       const spawns = refillSafely();
       paintBoard();
       animateSpawns(spawns);
-      await sleep(TIMING.refill + state.stage.size * 22);
+      await sleep(TIMING.refill + state.stage.size * 24);
       clearMotionClasses();
     }
 
     if (isClear()) {
       state.cleared = true;
       elements.message.className = "message success";
-      elements.message.textContent = "クリア！ ステゴンもうれしそう。";
+      elements.message.textContent = `クリア！ ${ICONS[stage.goal.tile]}をしっかり集めたよ！`;
       elements.next.disabled = stageIndex >= window.STEGON_STAGES.length - 1;
     } else if (state.movesUsed >= stage.maxMoves) {
       elements.message.textContent = "あとちょっと。やりなおしてみよう！";
     } else if (!chain) {
       elements.message.textContent = "こんどは、3つならぶ場所をさがしてみよう。";
+    } else if (moveTargetCount > 0) {
+      elements.message.textContent = `この一手で ${ICONS[stage.goal.tile]} ${moveTargetCount}こ！`;
+    } else {
+      elements.message.textContent = "けせた！ でも目標のパネルではなかったよ。";
     }
 
     state.busy = false;
@@ -276,26 +286,56 @@
     return matches;
   }
 
-  async function clearMatches(matches) {
-    const tiles = [...matches].map(index => elements.board.children[index]).filter(Boolean);
-    tiles.forEach(tile => tile.classList.add("match-ready"));
-    await sleep(prefersReducedMotion ? 70 : TIMING.matchHold);
+  async function clearMatches(matches, moveTargetCount) {
+    const ordered = [...matches].sort((a, b) => a - b);
+    const goalType = state.stage.goal.tile;
 
-    tiles.forEach(tile => {
-      tile.classList.remove("match-ready");
-      tile.classList.add("clearing");
+    ordered.forEach(index => {
+      const tile = elements.board.children[index];
+      if (tile) tile.classList.add("match-ready");
     });
-    await sleep(prefersReducedMotion ? 120 : TIMING.clear);
+    await sleep(prefersReducedMotion ? 80 : TIMING.matchHold);
 
-    matches.forEach(index => {
+    for (const index of ordered) {
+      const tile = elements.board.children[index];
       const type = state.board[index];
-      if (type) state.collected[type] += 1;
+      if (!tile || !type) continue;
+
+      tile.classList.remove("match-ready");
+
+      if (type === goalType) {
+        moveTargetCount += 1;
+        state.collected[type] += 1;
+        paintGoal();
+
+        tile._countBadge.textContent = String(moveTargetCount);
+        tile._countBadge.dataset.type = type;
+        tile.classList.add("counting");
+        await sleep(prefersReducedMotion ? 75 : TIMING.countStep);
+        tile.classList.remove("counting");
+        tile.classList.add("clearing");
+      } else {
+        state.collected[type] += 1;
+        tile.classList.add("clearing", "non-target-clear");
+        await sleep(prefersReducedMotion ? 45 : TIMING.otherStep);
+      }
+    }
+
+    await sleep(prefersReducedMotion ? 130 : TIMING.clear);
+
+    ordered.forEach(index => {
       state.board[index] = null;
+      const tile = elements.board.children[index];
+      if (tile?._countBadge) {
+        tile._countBadge.textContent = "";
+        tile._countBadge.removeAttribute("data-type");
+      }
     });
 
     paintBoard();
     clearMotionClasses();
-    await sleep(prefersReducedMotion ? 20 : TIMING.afterClear);
+    await sleep(prefersReducedMotion ? 30 : TIMING.afterClear);
+    return moveTargetCount;
   }
 
   function collapseBoard() {
@@ -330,7 +370,7 @@
     drops.forEach((rows, index) => {
       const tile = elements.board.children[index];
       tile.style.setProperty("--drop-y", `${-rows * step}px`);
-      tile.style.setProperty("--motion-duration", `${Math.max(195, TIMING.drop - chain * 14)}ms`);
+      tile.style.setProperty("--motion-duration", `${Math.max(225, TIMING.drop - chain * 10)}ms`);
       tile.classList.add("dropping");
     });
   }
@@ -342,7 +382,7 @@
       const row = Math.floor(index / size);
       const tile = elements.board.children[index];
       tile.style.setProperty("--spawn-y", `${-(row + 1) * step}px`);
-      tile.style.setProperty("--spawn-delay", `${(index % size) * 24 + row * 16}ms`);
+      tile.style.setProperty("--spawn-delay", `${(index % size) * 28 + row * 18}ms`);
       tile.classList.add("spawning");
     });
   }
@@ -369,26 +409,32 @@
 
   function showChain(chain) {
     elements.chain.textContent = String(chain);
-    elements.message.textContent = chain === 1 ? "けせた！" : `${chain}れんさ！`;
-    elements.callout.textContent = chain === 1 ? "NICE!" : `${chain}れんさ！`;
+    elements.chain.classList.remove("chain-pop");
+    void elements.chain.offsetWidth;
+    elements.chain.classList.add("chain-pop");
+
+    if (chain === 1) {
+      elements.message.textContent = "そろった！";
+      return;
+    }
+
+    elements.message.textContent = `${chain}れんさ！`;
+    elements.callout.textContent = `${chain}れんさ！`;
     elements.callout.dataset.level = String(Math.min(chain, 4));
     elements.callout.classList.remove("show");
     void elements.callout.offsetWidth;
     elements.callout.classList.add("show");
 
-    elements.chain.classList.remove("chain-pop");
-    void elements.chain.offsetWidth;
-    elements.chain.classList.add("chain-pop");
-
-    if (chain >= 2 && navigator.vibrate) {
+    if (navigator.vibrate) {
       navigator.vibrate(chain >= 4 ? [25, 20, 35] : chain >= 3 ? 35 : 22);
     }
   }
 
   function clearMotionClasses() {
     elements.board.querySelectorAll(".tile").forEach(tile => {
-      tile.classList.remove("match-ready", "clearing", "dropping", "spawning");
+      tile.classList.remove("match-ready", "counting", "clearing", "non-target-clear", "dropping", "spawning");
       tile.style.removeProperty("--motion-duration");
+      if (tile._countBadge && !tile._countBadge.textContent) tile._countBadge.removeAttribute("data-type");
     });
   }
 
