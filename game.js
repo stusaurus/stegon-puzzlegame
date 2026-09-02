@@ -9,13 +9,14 @@
     reducedFlip: 220,
     neighborDelay: 55,
     settle: 35,
-    matchHold: 240,
-    countStep: 165,
-    otherStep: 90,
-    clear: 420,
-    afterClear: 110,
-    drop: 300,
-    refill: 320
+    matchHold: 300,
+    countHold: 280,
+    countClear: 180,
+    countGap: 45,
+    otherClear: 300,
+    afterClear: 130,
+    drop: 320,
+    refill: 340
   };
 
   const $ = id => document.getElementById(id);
@@ -232,7 +233,7 @@
       const drops = collapseBoard();
       paintBoard();
       animateDrops(drops, chain);
-      await sleep(Math.max(225, TIMING.drop - chain * 10));
+      await sleep(Math.max(245, TIMING.drop - chain * 8));
       clearMotionClasses();
     }
 
@@ -286,55 +287,84 @@
     return matches;
   }
 
+  function resetCountBadge(tile) {
+    if (!tile?._countBadge) return;
+    tile._countBadge.textContent = "";
+    tile._countBadge.removeAttribute("data-type");
+  }
+
+  async function clearTargetTile(index, nextCount) {
+    const tile = elements.board.children[index];
+    const type = state.board[index];
+    if (!tile || !type) return;
+
+    tile.classList.remove("match-ready");
+    tile._countBadge.textContent = String(nextCount);
+    tile._countBadge.dataset.type = type;
+    tile.classList.add("counting");
+    await sleep(prefersReducedMotion ? 100 : TIMING.countHold);
+
+    tile.classList.remove("counting");
+    tile.classList.add("clearing", "target-clear");
+    await sleep(prefersReducedMotion ? 90 : TIMING.countClear);
+
+    state.collected[type] += 1;
+    state.board[index] = null;
+    paintGoal();
+    resetCountBadge(tile);
+    tile.classList.remove("clearing", "target-clear");
+    paintTile(index);
+    await sleep(prefersReducedMotion ? 20 : TIMING.countGap);
+  }
+
   async function clearMatches(matches, moveTargetCount) {
     const ordered = [...matches].sort((a, b) => a - b);
     const goalType = state.stage.goal.tile;
+    const targetIndices = ordered.filter(index => state.board[index] === goalType);
+    const otherIndices = ordered.filter(index => state.board[index] !== goalType);
 
     ordered.forEach(index => {
       const tile = elements.board.children[index];
       if (tile) tile.classList.add("match-ready");
     });
-    await sleep(prefersReducedMotion ? 80 : TIMING.matchHold);
+    await sleep(prefersReducedMotion ? 100 : TIMING.matchHold);
 
-    for (const index of ordered) {
-      const tile = elements.board.children[index];
-      const type = state.board[index];
-      if (!tile || !type) continue;
-
-      tile.classList.remove("match-ready");
-
-      if (type === goalType) {
-        moveTargetCount += 1;
-        state.collected[type] += 1;
-        paintGoal();
-
-        tile._countBadge.textContent = String(moveTargetCount);
-        tile._countBadge.dataset.type = type;
-        tile.classList.add("counting");
-        await sleep(prefersReducedMotion ? 75 : TIMING.countStep);
-        tile.classList.remove("counting");
-        tile.classList.add("clearing");
-      } else {
-        state.collected[type] += 1;
-        tile.classList.add("clearing", "non-target-clear");
-        await sleep(prefersReducedMotion ? 45 : TIMING.otherStep);
-      }
+    for (const index of targetIndices) {
+      moveTargetCount += 1;
+      await clearTargetTile(index, moveTargetCount);
     }
 
-    await sleep(prefersReducedMotion ? 130 : TIMING.clear);
+    const otherTiles = otherIndices
+      .map(index => elements.board.children[index])
+      .filter(Boolean);
 
-    ordered.forEach(index => {
-      state.board[index] = null;
-      const tile = elements.board.children[index];
-      if (tile?._countBadge) {
-        tile._countBadge.textContent = "";
-        tile._countBadge.removeAttribute("data-type");
-      }
+    otherTiles.forEach(tile => {
+      tile.classList.remove("match-ready");
+      tile.classList.add("clearing", "non-target-clear");
     });
 
-    paintBoard();
+    if (otherTiles.length) {
+      await sleep(prefersReducedMotion ? 120 : TIMING.otherClear);
+      otherIndices.forEach(index => {
+        const type = state.board[index];
+        if (type) state.collected[type] += 1;
+        state.board[index] = null;
+        const tile = elements.board.children[index];
+        if (tile) {
+          tile.classList.remove("clearing", "non-target-clear");
+          resetCountBadge(tile);
+          paintTile(index);
+        }
+      });
+    }
+
+    ordered.forEach(index => {
+      const tile = elements.board.children[index];
+      if (tile) tile.classList.remove("match-ready");
+    });
+
     clearMotionClasses();
-    await sleep(prefersReducedMotion ? 30 : TIMING.afterClear);
+    await sleep(prefersReducedMotion ? 35 : TIMING.afterClear);
     return moveTargetCount;
   }
 
@@ -370,7 +400,7 @@
     drops.forEach((rows, index) => {
       const tile = elements.board.children[index];
       tile.style.setProperty("--drop-y", `${-rows * step}px`);
-      tile.style.setProperty("--motion-duration", `${Math.max(225, TIMING.drop - chain * 10)}ms`);
+      tile.style.setProperty("--motion-duration", `${Math.max(245, TIMING.drop - chain * 8)}ms`);
       tile.classList.add("dropping");
     });
   }
@@ -432,7 +462,7 @@
 
   function clearMotionClasses() {
     elements.board.querySelectorAll(".tile").forEach(tile => {
-      tile.classList.remove("match-ready", "counting", "clearing", "non-target-clear", "dropping", "spawning");
+      tile.classList.remove("match-ready", "counting", "clearing", "target-clear", "non-target-clear", "dropping", "spawning");
       tile.style.removeProperty("--motion-duration");
       if (tile._countBadge && !tile._countBadge.textContent) tile._countBadge.removeAttribute("data-type");
     });
