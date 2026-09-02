@@ -42,7 +42,9 @@
     render();
   }
 
-  function render() {
+  function render(options = {}) {
+    const { dropOffsets = null, spawnIndices = null } = options;
+
     stageNumberEl.textContent = stage.id;
     movesLeftEl.textContent = `${Math.max(0, stage.maxMoves - movesUsed)}手`;
     const goalNow = collected[stage.goal.tile] || 0;
@@ -51,6 +53,7 @@
 
     boardEl.style.setProperty("--size", stage.size);
     boardEl.innerHTML = "";
+
     board.forEach((type, index) => {
       const tile = document.createElement("button");
       tile.className = "tile";
@@ -64,6 +67,29 @@
       tile.addEventListener("click", () => handleMove(index));
       boardEl.appendChild(tile);
     });
+
+    const tiles = [...boardEl.querySelectorAll(".tile")];
+    const sampleTile = tiles.find(tile => tile.dataset.type !== "empty");
+    const styles = getComputedStyle(boardEl);
+    const gap = parseFloat(styles.rowGap || styles.gap) || 0;
+    const step = sampleTile ? sampleTile.getBoundingClientRect().height + gap : 0;
+
+    if (dropOffsets) {
+      dropOffsets.forEach((rows, index) => {
+        const tile = tiles[index];
+        if (!tile || rows <= 0) return;
+        tile.style.setProperty("--drop-y", `${-(rows * step)}px`);
+        tile.classList.add("dropping");
+      });
+    }
+
+    if (spawnIndices) {
+      spawnIndices.forEach(index => {
+        const tile = tiles[index];
+        if (!tile) return;
+        tile.classList.add("spawning");
+      });
+    }
   }
 
   function neighbors(index) {
@@ -74,6 +100,18 @@
     return points
       .filter(([r, c]) => r >= 0 && c >= 0 && r < size && c < size)
       .map(([r, c]) => r * size + c);
+  }
+
+  function popChain(chain) {
+    chainCountEl.classList.remove("chain-pop");
+    messageEl.classList.remove("chain-pop");
+    void chainCountEl.offsetWidth;
+    chainCountEl.classList.add("chain-pop");
+    messageEl.classList.add("chain-pop");
+
+    if (chain >= 2 && navigator.vibrate) {
+      navigator.vibrate(chain >= 3 ? [25, 25, 35] : 25);
+    }
   }
 
   async function handleMove(index) {
@@ -114,21 +152,21 @@
       chain += 1;
       chainCountEl.textContent = String(chain);
       messageEl.textContent = chain === 1 ? "けせた！" : `${chain}れんさ！`;
+      popChain(chain);
       await clearMatches(matches);
 
       // 連鎖中は新しいパネルを補充しない。
-      // 盤面に残ったパネルが落下して揃ったときだけ次の連鎖になる。
-      collapseBoard();
-      render();
-      await sleep(190);
+      // 残ったパネルが実際に下へ落ち、その結果で次の連鎖を判定する。
+      const dropOffsets = collapseBoard();
+      render({ dropOffsets });
+      await sleep(300);
     }
 
-    // 連鎖が完全に終わってから補充する。
-    // 補充パネルだけで偶然3つ揃わないように安全な面を選ぶ。
+    // 連鎖終了後だけ補充。補充そのものでは偶然3つ揃わない。
     if (board.some(value => value === null)) {
-      refillSafely();
-      render();
-      await sleep(120);
+      const spawnIndices = refillSafely();
+      render({ spawnIndices });
+      await sleep(270);
     }
 
     if (checkClear()) {
@@ -194,7 +232,7 @@
     document.querySelectorAll(".tile").forEach((tile, index) => {
       if (matches.has(index)) tile.classList.add("clearing");
     });
-    await sleep(180);
+    await sleep(220);
 
     matches.forEach(index => {
       const type = board[index];
@@ -205,24 +243,34 @@
 
   function collapseBoard() {
     const size = stage.size;
+    const dropOffsets = new Map();
 
     for (let c = 0; c < size; c += 1) {
       const remaining = [];
+
       for (let r = size - 1; r >= 0; r -= 1) {
-        const value = board[r * size + c];
-        if (value) remaining.push(value);
+        const index = r * size + c;
+        const value = board[index];
+        if (value) remaining.push({ value, fromRow: r });
       }
 
       for (let r = 0; r < size; r += 1) board[r * size + c] = null;
-      remaining.forEach((value, offset) => {
-        const row = size - 1 - offset;
-        board[row * size + c] = value;
+
+      remaining.forEach((entry, offset) => {
+        const targetRow = size - 1 - offset;
+        const targetIndex = targetRow * size + c;
+        board[targetIndex] = entry.value;
+        const rowsDropped = targetRow - entry.fromRow;
+        if (rowsDropped > 0) dropOffsets.set(targetIndex, rowsDropped);
       });
     }
+
+    return dropOffsets;
   }
 
   function refillSafely() {
     const size = stage.size;
+    const spawnIndices = new Set();
 
     for (let c = 0; c < size; c += 1) {
       for (let r = size - 1; r >= 0; r -= 1) {
@@ -239,8 +287,12 @@
         } else {
           board[index] = preferred;
         }
+
+        spawnIndices.add(index);
       }
     }
+
+    return spawnIndices;
   }
 
   function wouldCreateMatch(index, type) {
