@@ -5,10 +5,10 @@
   const ICONS = { grass: "🌿", berry: "🍓" };
   const FLIP = { grass: "berry", berry: "grass" };
   const TIMING = {
-    flipOut: 125,
-    flipIn: 145,
-    neighborDelay: 45,
-    settle: 28,
+    flip: 310,
+    reducedFlip: 220,
+    neighborDelay: 55,
+    settle: 35,
     clear: 210,
     drop: 270,
     refill: 300
@@ -78,9 +78,32 @@
       tile.type = "button";
       tile.dataset.index = String(index);
       tile.setAttribute("role", "gridcell");
+
+      const card = document.createElement("span");
+      card.className = "tile-card";
+
+      const front = document.createElement("span");
+      front.className = "tile-face tile-front";
+
+      const back = document.createElement("span");
+      back.className = "tile-face tile-back";
+
+      card.append(front, back);
+      tile.appendChild(card);
+
+      tile._card = card;
+      tile._frontFace = front;
+      tile._backFace = back;
+      tile._flipped = false;
+
       tile.addEventListener("click", () => handleMove(index));
       elements.board.appendChild(tile);
     });
+  }
+
+  function paintFace(face, type) {
+    face.dataset.type = type || "empty";
+    face.textContent = type ? ICONS[type] : "";
   }
 
   function paintTile(index) {
@@ -89,12 +112,27 @@
 
     const type = state.board[index];
     tile.dataset.type = type || "empty";
-    tile.textContent = type ? ICONS[type] : "";
     tile.disabled = state.busy || state.cleared || !type;
     tile.setAttribute(
       "aria-label",
       type === "grass" ? "草パネル" : type === "berry" ? "木の実パネル" : "空きマス"
     );
+
+    if (!type) {
+      paintFace(tile._frontFace, null);
+      paintFace(tile._backFace, null);
+      return;
+    }
+
+    if (tile._flipped) {
+      paintFace(tile._backFace, type);
+      paintFace(tile._frontFace, FLIP[type]);
+      tile._card.style.transform = "rotateY(180deg)";
+    } else {
+      paintFace(tile._frontFace, type);
+      paintFace(tile._backFace, FLIP[type]);
+      tile._card.style.transform = "rotateY(0deg)";
+    }
   }
 
   function paintBoard() {
@@ -129,56 +167,62 @@
     if (delayMs) await sleep(delayMs);
 
     const tile = elements.board.children[index];
-    if (!tile) return;
+    if (!tile || !state.board[index]) return;
+
+    const card = tile._card;
+    const oldType = state.board[index];
+    const newType = FLIP[oldType];
+    const startAngle = tile._flipped ? 180 : 0;
+    const endAngle = startAngle + 180;
+    const duration = prefersReducedMotion ? TIMING.reducedFlip : TIMING.flip;
+
+    if (tile._flipped) {
+      paintFace(tile._backFace, oldType);
+      paintFace(tile._frontFace, newType);
+    } else {
+      paintFace(tile._frontFace, oldType);
+      paintFace(tile._backFace, newType);
+    }
 
     tile.classList.add("tap-wave", "flip-active");
 
-    if (prefersReducedMotion || typeof tile.animate !== "function") {
-      await sleep(35);
-      state.board[index] = FLIP[state.board[index]];
-      paintTile(index);
-      tile.classList.remove("tap-wave", "flip-active");
-      return;
+    const keyframes = [
+      { transform: `translateY(0) rotateY(${startAngle}deg) scale(1)`, filter: "brightness(1)", offset: 0 },
+      { transform: `translateY(-5px) rotateY(${startAngle + 72}deg) scale(.975)`, filter: "brightness(1.08)", offset: .40 },
+      { transform: `translateY(-5px) rotateY(${startAngle + 90}deg) scale(.96)`, filter: "brightness(1.12)", offset: .50 },
+      { transform: `translateY(-2px) rotateY(${startAngle + 158}deg) scale(1.015)`, filter: "brightness(1.04)", offset: .84 },
+      { transform: `translateY(0) rotateY(${endAngle}deg) scale(1.035)`, filter: "brightness(1.01)", offset: .94 },
+      { transform: `translateY(0) rotateY(${endAngle}deg) scale(1)`, filter: "brightness(1)", offset: 1 }
+    ];
+
+    if (typeof card.animate === "function") {
+      const animation = card.animate(keyframes, {
+        duration,
+        easing: "cubic-bezier(.22,.72,.25,1)",
+        fill: "forwards"
+      });
+      try {
+        await animation.finished;
+      } catch (_) {
+        // Interrupted animations simply settle to their target below.
+      }
+
+      const normalizedAngle = endAngle % 360;
+      card.style.transform = `rotateY(${normalizedAngle}deg)`;
+      animation.cancel();
+    } else {
+      card.style.transition = `transform ${duration}ms cubic-bezier(.22,.72,.25,1)`;
+      card.style.transform = `rotateY(${endAngle}deg)`;
+      await sleep(duration);
+      card.style.transition = "none";
+      card.style.transform = `rotateY(${endAngle % 360}deg)`;
+      void card.offsetWidth;
+      card.style.removeProperty("transition");
     }
 
-    const flipOut = tile.animate(
-      [
-        { transform: "translateY(0) rotateY(0deg) scale(1)", filter: "brightness(1)" },
-        { transform: "translateY(-3px) rotateY(90deg) scale(.96)", filter: "brightness(1.08)" }
-      ],
-      {
-        duration: TIMING.flipOut,
-        easing: "cubic-bezier(.42, 0, .58, 1)",
-        fill: "forwards"
-      }
-    );
-
-    await flipOut.finished;
-    flipOut.cancel();
-
-    // 真横になった瞬間だけ中身を切り替える。
-    // -90deg から開くことで鏡文字を見せず、本当に裏返ったように見せる。
-    tile.style.transform = "translateY(-3px) rotateY(-90deg) scale(.96)";
-    state.board[index] = FLIP[state.board[index]];
+    state.board[index] = newType;
+    tile._flipped = !tile._flipped;
     paintTile(index);
-
-    const flipIn = tile.animate(
-      [
-        { transform: "translateY(-3px) rotateY(-90deg) scale(.96)", filter: "brightness(1.08)" },
-        { transform: "translateY(-1px) rotateY(-22deg) scale(1.01)", filter: "brightness(1.04)", offset: .68 },
-        { transform: "translateY(0) rotateY(0deg) scale(1.035)", filter: "brightness(1.01)", offset: .86 },
-        { transform: "translateY(0) rotateY(0deg) scale(1)", filter: "brightness(1)" }
-      ],
-      {
-        duration: TIMING.flipIn,
-        easing: "cubic-bezier(.16, .84, .3, 1)",
-        fill: "forwards"
-      }
-    );
-
-    await flipIn.finished;
-    flipIn.cancel();
-    tile.style.removeProperty("transform");
     tile.classList.remove("tap-wave", "flip-active");
   }
 
