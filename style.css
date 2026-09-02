@@ -69,6 +69,8 @@ h1 { margin: 0; font-size: clamp(24px, 7vw, 34px); line-height: 1.05; }
   background: rgba(106, 91, 59, .14);
   touch-action: manipulation;
   overflow: hidden;
+  perspective: 900px;
+  perspective-origin: center center;
 }
 .tile {
   min-width: 0;
@@ -80,19 +82,26 @@ h1 { margin: 0; font-size: clamp(24px, 7vw, 34px); line-height: 1.05; }
   line-height: 1;
   box-shadow: inset 0 -5px 0 rgba(0,0,0,.08), 0 2px 0 rgba(255,255,255,.65);
   cursor: pointer;
-  transition: transform .14s ease, opacity .18s ease, background .18s ease;
+  transition: opacity .18s ease, background .18s ease, box-shadow .16s ease;
   -webkit-tap-highlight-color: transparent;
   will-change: transform, opacity;
+  transform-origin: 50% 50%;
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
-.tile:active { transform: scale(.92); }
+.tile:active { transform: scale(.96); }
 .tile[data-type="grass"] { background: #cfe5a8; }
 .tile[data-type="berry"] { background: #f2c6bd; }
 .tile[data-type="empty"] {
   background: rgba(255,255,255,.22);
   box-shadow: inset 0 0 0 1px rgba(100,91,64,.06);
 }
-.tile.flipping { transform: rotateY(90deg) scale(.92); }
-.tile.tap-wave { animation: tap-wave .22s var(--ripple-delay, 0ms) ease-out both; }
+.tile.flip-active {
+  position: relative;
+  z-index: 2;
+}
+.tile.tap-wave { animation: tap-wave .24s ease-out both; }
 .tile.clearing { animation: clear-pop .22s ease forwards; }
 .tile.dropping { animation: tile-drop var(--motion-duration, .27s) cubic-bezier(.18,.72,.28,1.08) both; }
 .tile.spawning { animation: tile-spawn .3s var(--spawn-delay, 0ms) cubic-bezier(.18,.72,.28,1.08) both; }
@@ -146,9 +155,15 @@ h1 { margin: 0; font-size: clamp(24px, 7vw, 34px); line-height: 1.05; }
 }
 
 @keyframes tap-wave {
-  0% { filter: brightness(1); box-shadow: inset 0 -5px 0 rgba(0,0,0,.08), 0 2px 0 rgba(255,255,255,.65); }
-  45% { filter: brightness(1.12); box-shadow: inset 0 -5px 0 rgba(0,0,0,.05), 0 0 0 5px rgba(255,210,73,.66); }
-  100% { filter: brightness(1); box-shadow: inset 0 -5px 0 rgba(0,0,0,.08), 0 2px 0 rgba(255,255,255,.65); }
+  0% {
+    box-shadow: inset 0 -5px 0 rgba(0,0,0,.08), 0 2px 0 rgba(255,255,255,.65);
+  }
+  45% {
+    box-shadow: inset 0 -5px 0 rgba(0,0,0,.05), 0 0 0 4px rgba(255,210,73,.62), 0 8px 18px rgba(92,83,58,.14);
+  }
+  100% {
+    box-shadow: inset 0 -5px 0 rgba(0,0,0,.08), 0 2px 0 rgba(255,255,255,.65);
+  }
 }
 
 @keyframes callout {
