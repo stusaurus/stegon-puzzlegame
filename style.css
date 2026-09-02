@@ -6,7 +6,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; min-height: 100%; }
+html, body { margin: 0; min-width: 0; min-height: 100%; overflow-x: clip; }
 body {
   min-height: 100svh;
   background: linear-gradient(#f5efd9, #e9f1d6);
@@ -74,13 +74,14 @@ h1 { margin: 0; font-size: clamp(24px, 7vw, 34px); line-height: 1.05; }
 }
 .tile {
   min-width: 0;
+  min-height: 0;
   border: 0;
   border-radius: clamp(12px, 3vw, 20px);
-  display: grid;
-  place-items: center;
+  position: relative;
+  padding: 0;
+  background: transparent;
   font-size: clamp(26px, calc(13vw - var(--size) * 5px), 52px);
   line-height: 1;
-  box-shadow: inset 0 -5px 0 rgba(0,0,0,.08), 0 2px 0 rgba(255,255,255,.65);
   cursor: pointer;
   transition: opacity .18s ease, background .18s ease, box-shadow .16s ease;
   -webkit-tap-highlight-color: transparent;

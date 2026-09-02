@@ -400,5 +400,8 @@
   elements.restart.addEventListener("click", () => loadStage(stageIndex));
   elements.next.addEventListener("click", () => loadStage(stageIndex + 1));
 
+  function isClear() { return state.collected[state.stage.goal.tile] >= state.stage.goal.count; }
+  elements.restart.addEventListener("click", () => loadStage(stageIndex));
+  elements.next.addEventListener("click", () => loadStage(stageIndex + 1));
   loadStage(0);
 })();
