@@ -4,18 +4,35 @@
   const TYPES = ["grass", "berry"];
   const ICONS = { grass: "🌿", berry: "🍓" };
   const FLIP = { grass: "berry", berry: "grass" };
-  const TIMING = { pulse: 90, flipHalf: 105, clear: 210, drop: 270, refill: 300 };
+  const TIMING = {
+    flipOut: 125,
+    flipIn: 145,
+    neighborDelay: 45,
+    settle: 28,
+    clear: 210,
+    drop: 270,
+    refill: 300
+  };
 
   const $ = id => document.getElementById(id);
   const elements = {
-    board: $("board"), stage: $("stageNumber"), moves: $("movesLeft"), chain: $("chainCount"),
-    goal: $("goalText"), goalBar: $("goalBar"), message: $("message"), callout: $("chainCallout"),
-    restart: $("restartButton"), next: $("nextButton")
+    board: $("board"),
+    stage: $("stageNumber"),
+    moves: $("movesLeft"),
+    chain: $("chainCount"),
+    goal: $("goalText"),
+    goalBar: $("goalBar"),
+    message: $("message"),
+    callout: $("chainCallout"),
+    restart: $("restartButton"),
+    next: $("nextButton")
   };
+
+  const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
   let stageIndex = 0;
   let state;
-  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
   function validateStage(candidate) {
     const required = ["id", "size", "maxMoves", "goal", "initialBoard", "refill", "mechanics", "difficulty"];
@@ -33,7 +50,16 @@
   function loadStage(index) {
     stageIndex = Math.max(0, Math.min(index, window.STEGON_STAGES.length - 1));
     const stage = validateStage(window.STEGON_STAGES[stageIndex]);
-    state = { stage, board: [...stage.initialBoard], movesUsed: 0, collected: { grass: 0, berry: 0 }, refillIndex: 0, busy: false, cleared: false };
+    state = {
+      stage,
+      board: [...stage.initialBoard],
+      movesUsed: 0,
+      collected: { grass: 0, berry: 0 },
+      refillIndex: 0,
+      busy: false,
+      cleared: false
+    };
+
     elements.next.disabled = true;
     elements.message.className = "message";
     elements.message.textContent = "パネルをタップすると、上下左右もくるりん！";
@@ -42,11 +68,10 @@
     paintBoard();
   }
 
-  // The tile DOM is created once per stage. Moves only repaint content/classes,
-  // keeping 6x6 boards smooth on mobile and preserving animation continuity.
   function createBoard() {
     elements.board.style.setProperty("--size", state.stage.size);
     elements.board.replaceChildren();
+
     state.board.forEach((_, index) => {
       const tile = document.createElement("button");
       tile.className = "tile";
@@ -58,61 +83,135 @@
     });
   }
 
+  function paintTile(index) {
+    const tile = elements.board.children[index];
+    if (!tile) return;
+
+    const type = state.board[index];
+    tile.dataset.type = type || "empty";
+    tile.textContent = type ? ICONS[type] : "";
+    tile.disabled = state.busy || state.cleared || !type;
+    tile.setAttribute(
+      "aria-label",
+      type === "grass" ? "草パネル" : type === "berry" ? "木の実パネル" : "空きマス"
+    );
+  }
+
   function paintBoard() {
-    const { stage, board, movesUsed, collected, busy, cleared } = state;
+    const { stage, movesUsed, collected } = state;
     elements.stage.textContent = stage.id;
     elements.moves.textContent = `${Math.max(0, stage.maxMoves - movesUsed)}手`;
+
     const count = collected[stage.goal.tile] || 0;
     elements.goal.textContent = `${ICONS[stage.goal.tile]}を ${stage.goal.count}こ あつめよう（${Math.min(count, stage.goal.count)}/${stage.goal.count}）`;
     elements.goalBar.style.width = `${Math.min(100, count / stage.goal.count * 100)}%`;
-    [...elements.board.children].forEach((tile, index) => {
-      const type = board[index];
-      tile.dataset.type = type || "empty";
-      tile.textContent = type ? ICONS[type] : "";
-      tile.disabled = busy || cleared || !type;
-      tile.setAttribute("aria-label", type === "grass" ? "草パネル" : type === "berry" ? "木の実パネル" : "空きマス");
-    });
+
+    for (let index = 0; index < state.board.length; index += 1) paintTile(index);
   }
 
   function neighbors(index) {
     const size = state.stage.size;
-    const row = Math.floor(index / size), col = index % size;
-    return [[row, col], [row - 1, col], [row + 1, col], [row, col - 1], [row, col + 1]]
+    const row = Math.floor(index / size);
+    const col = index % size;
+
+    return [
+      [row, col],
+      [row - 1, col],
+      [row + 1, col],
+      [row, col - 1],
+      [row, col + 1]
+    ]
       .filter(([r, c]) => r >= 0 && c >= 0 && r < size && c < size)
       .map(([r, c]) => r * size + c);
   }
 
+  async function flipTile(index, delayMs) {
+    if (delayMs) await sleep(delayMs);
+
+    const tile = elements.board.children[index];
+    if (!tile) return;
+
+    tile.classList.add("tap-wave", "flip-active");
+
+    if (prefersReducedMotion || typeof tile.animate !== "function") {
+      await sleep(35);
+      state.board[index] = FLIP[state.board[index]];
+      paintTile(index);
+      tile.classList.remove("tap-wave", "flip-active");
+      return;
+    }
+
+    const flipOut = tile.animate(
+      [
+        { transform: "translateY(0) rotateY(0deg) scale(1)", filter: "brightness(1)" },
+        { transform: "translateY(-3px) rotateY(90deg) scale(.96)", filter: "brightness(1.08)" }
+      ],
+      {
+        duration: TIMING.flipOut,
+        easing: "cubic-bezier(.42, 0, .58, 1)",
+        fill: "forwards"
+      }
+    );
+
+    await flipOut.finished;
+    flipOut.cancel();
+
+    // 真横になった瞬間だけ中身を切り替える。
+    // -90deg から開くことで鏡文字を見せず、本当に裏返ったように見せる。
+    tile.style.transform = "translateY(-3px) rotateY(-90deg) scale(.96)";
+    state.board[index] = FLIP[state.board[index]];
+    paintTile(index);
+
+    const flipIn = tile.animate(
+      [
+        { transform: "translateY(-3px) rotateY(-90deg) scale(.96)", filter: "brightness(1.08)" },
+        { transform: "translateY(-1px) rotateY(-22deg) scale(1.01)", filter: "brightness(1.04)", offset: .68 },
+        { transform: "translateY(0) rotateY(0deg) scale(1.035)", filter: "brightness(1.01)", offset: .86 },
+        { transform: "translateY(0) rotateY(0deg) scale(1)", filter: "brightness(1)" }
+      ],
+      {
+        duration: TIMING.flipIn,
+        easing: "cubic-bezier(.16, .84, .3, 1)",
+        fill: "forwards"
+      }
+    );
+
+    await flipIn.finished;
+    flipIn.cancel();
+    tile.style.removeProperty("transform");
+    tile.classList.remove("tap-wave", "flip-active");
+  }
+
   async function animateFlip(indices, center) {
-    indices.forEach(index => {
-      const tile = elements.board.children[index];
-      tile.style.setProperty("--ripple-delay", `${index === center ? 0 : 45}ms`);
-      tile.classList.add("tap-wave");
+    const jobs = indices.map(index => {
+      const delay = index === center ? 0 : TIMING.neighborDelay;
+      return flipTile(index, delay);
     });
-    await sleep(TIMING.pulse);
-    indices.forEach(index => elements.board.children[index].classList.add("flipping"));
-    await sleep(TIMING.flipHalf);
-    indices.forEach(index => { state.board[index] = FLIP[state.board[index]]; });
-    paintBoard();
-    await sleep(TIMING.flipHalf);
-    indices.forEach(index => elements.board.children[index].classList.remove("tap-wave", "flipping"));
+
+    await Promise.all(jobs);
+    await sleep(TIMING.settle);
   }
 
   async function handleMove(index) {
     const { stage } = state;
     if (state.busy || state.cleared || state.movesUsed >= stage.maxMoves) return;
+
     state.busy = true;
     state.movesUsed += 1;
     elements.chain.textContent = "0";
     paintBoard();
+
     await animateFlip(neighbors(index), index);
 
     let chain = 0;
     while (true) {
       const matches = findMatches();
       if (!matches.size) break;
+
       chain += 1;
       showChain(chain);
       await clearMatches(matches);
+
       const drops = collapseBoard();
       paintBoard();
       animateDrops(drops, chain);
@@ -138,55 +237,73 @@
     } else if (!chain) {
       elements.message.textContent = "こんどは、3つならぶ場所をさがしてみよう。";
     }
+
     state.busy = false;
     paintBoard();
   }
 
   function findMatches(board = state.board) {
-    const size = state.stage.size, matches = new Set();
+    const size = state.stage.size;
+    const matches = new Set();
+
     const scan = indices => {
       let start = 0;
       while (start < indices.length) {
         const type = board[indices[start]];
         let end = start + 1;
         while (type && end < indices.length && board[indices[end]] === type) end += 1;
-        if (type && end - start >= 3) for (let i = start; i < end; i += 1) matches.add(indices[i]);
+        if (type && end - start >= 3) {
+          for (let i = start; i < end; i += 1) matches.add(indices[i]);
+        }
         start = end;
       }
     };
+
     for (let i = 0; i < size; i += 1) {
       scan(Array.from({ length: size }, (_, c) => i * size + c));
       scan(Array.from({ length: size }, (_, r) => r * size + i));
     }
+
     return matches;
   }
 
   async function clearMatches(matches) {
     matches.forEach(index => elements.board.children[index].classList.add("clearing"));
     await sleep(TIMING.clear);
+
     matches.forEach(index => {
       const type = state.board[index];
       if (type) state.collected[type] += 1;
       state.board[index] = null;
     });
+
     paintBoard();
     clearMotionClasses();
   }
 
   function collapseBoard() {
-    const size = state.stage.size, drops = new Map();
+    const size = state.stage.size;
+    const drops = new Map();
+
     for (let col = 0; col < size; col += 1) {
       let targetRow = size - 1;
+
       for (let row = size - 1; row >= 0; row -= 1) {
         const from = row * size + col;
         if (!state.board[from]) continue;
+
         const target = targetRow * size + col;
         state.board[target] = state.board[from];
-        if (target !== from) { state.board[from] = null; drops.set(target, targetRow - row); }
+        if (target !== from) {
+          state.board[from] = null;
+          drops.set(target, targetRow - row);
+        }
         targetRow -= 1;
       }
+
       while (targetRow >= 0) state.board[targetRow-- * size + col] = null;
     }
+
     return drops;
   }
 
@@ -207,31 +324,46 @@
   }
 
   function animateSpawns(indices) {
-    const size = state.stage.size, step = tileStep();
+    const size = state.stage.size;
+    const step = tileStep();
+
     indices.forEach(index => {
-      const row = Math.floor(index / size), tile = elements.board.children[index];
+      const row = Math.floor(index / size);
+      const tile = elements.board.children[index];
       tile.style.setProperty("--spawn-y", `${-(row + 1) * step}px`);
       tile.style.setProperty("--spawn-delay", `${(index % size) * 24 + row * 16}ms`);
       tile.classList.add("spawning");
     });
   }
 
-  // Fill all holes as one deterministic search. Unlike a per-cell fallback, this
-  // guarantees that the refill itself never starts a match when a valid fill exists.
   function refillSafely() {
-    const holes = state.board.map((value, index) => value === null ? index : -1).filter(index => index >= 0);
-    const preferred = holes.map((_, offset) => state.stage.refill[(state.refillIndex + offset) % state.stage.refill.length]);
+    const holes = state.board
+      .map((value, index) => value === null ? index : -1)
+      .filter(index => index >= 0);
+
+    const preferred = holes.map(
+      (_, offset) => state.stage.refill[(state.refillIndex + offset) % state.stage.refill.length]
+    );
+
     const fill = position => {
       if (position === holes.length) return findMatches().size === 0;
+
       const index = holes[position];
       for (const type of [preferred[position], FLIP[preferred[position]]]) {
         state.board[index] = type;
         if (!findMatches().size && fill(position + 1)) return true;
       }
+
       state.board[index] = null;
       return false;
     };
-    if (!fill(0)) holes.forEach((index, offset) => { state.board[index] = preferred[offset]; });
+
+    if (!fill(0)) {
+      holes.forEach((index, offset) => {
+        state.board[index] = preferred[offset];
+      });
+    }
+
     state.refillIndex += holes.length;
     return holes;
   }
@@ -244,10 +376,14 @@
     elements.callout.classList.remove("show");
     void elements.callout.offsetWidth;
     elements.callout.classList.add("show");
+
     elements.chain.classList.remove("chain-pop");
     void elements.chain.offsetWidth;
     elements.chain.classList.add("chain-pop");
-    if (chain >= 2 && navigator.vibrate) navigator.vibrate(chain >= 4 ? [25, 20, 35] : chain >= 3 ? 35 : 22);
+
+    if (chain >= 2 && navigator.vibrate) {
+      navigator.vibrate(chain >= 4 ? [25, 20, 35] : chain >= 3 ? 35 : 22);
+    }
   }
 
   function clearMotionClasses() {
@@ -257,8 +393,12 @@
     });
   }
 
-  function isClear() { return state.collected[state.stage.goal.tile] >= state.stage.goal.count; }
+  function isClear() {
+    return state.collected[state.stage.goal.tile] >= state.stage.goal.count;
+  }
+
   elements.restart.addEventListener("click", () => loadStage(stageIndex));
   elements.next.addEventListener("click", () => loadStage(stageIndex + 1));
+
   loadStage(0);
 })();
