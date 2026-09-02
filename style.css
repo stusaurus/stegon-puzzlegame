@@ -134,8 +134,9 @@ h1 { margin: 0; font-size: clamp(24px, 7vw, 34px); line-height: 1.05; }
 }
 
 .tile.tap-wave { animation: tap-wave .24s ease-out both; }
-.tile.clearing { animation: clear-pop .22s ease forwards; }
-.tile.dropping { animation: tile-drop var(--motion-duration, .27s) cubic-bezier(.18,.72,.28,1.08) both; }
+.tile.match-ready .tile-card { animation: match-ready .17s ease-out both; }
+.tile.clearing .tile-card { animation: clear-pop .33s cubic-bezier(.18,.75,.25,1) forwards; }
+.tile.dropping { animation: tile-drop var(--motion-duration, .285s) cubic-bezier(.18,.72,.28,1.08) both; }
 .tile.spawning { animation: tile-spawn .3s var(--spawn-delay, 0ms) cubic-bezier(.18,.72,.28,1.08) both; }
 
 .chain-callout {
@@ -155,11 +156,11 @@ h1 { margin: 0; font-size: clamp(24px, 7vw, 34px); line-height: 1.05; }
 .chain-callout[data-level="2"] { font-size: 32px; }
 .chain-callout[data-level="3"] { font-size: 37px; color: #fff2a8; }
 .chain-callout[data-level="4"] { font-size: 42px; color: #ffe36c; }
-.chain-callout.show { animation: callout .62s cubic-bezier(.16,.82,.28,1) both; }
+.chain-callout.show { animation: callout 1s cubic-bezier(.16,.82,.28,1) both; }
 
 .message { min-height: 24px; margin: 0; text-align: center; font-weight: 800; font-size: 14px; transform-origin: center; }
 .message.success { font-size: 20px; }
-.chain-pop { animation: chain-pop .32s cubic-bezier(.2,.9,.25,1.2); }
+.chain-pop { animation: chain-pop .42s cubic-bezier(.2,.9,.25,1.2); }
 
 .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .button { min-height: 50px; border: 0; border-radius: 16px; font-weight: 900; font-size: 16px; }
@@ -167,10 +168,17 @@ h1 { margin: 0; font-size: clamp(24px, 7vw, 34px); line-height: 1.05; }
 .button.primary { background: #7f9d4f; color: white; box-shadow: inset 0 -4px 0 rgba(0,0,0,.12); }
 .button:disabled { opacity: .38; box-shadow: none; }
 
+@keyframes match-ready {
+  0% { filter: brightness(1); transform: scale(1); }
+  55% { filter: brightness(1.18) drop-shadow(0 0 7px rgba(255,225,112,.72)); transform: scale(1.055); }
+  100% { filter: brightness(1.1) drop-shadow(0 0 5px rgba(255,225,112,.52)); transform: scale(1.035); }
+}
+
 @keyframes clear-pop {
-  0% { opacity: 1; transform: scale(1); }
-  45% { opacity: 1; transform: scale(1.12); }
-  100% { opacity: 0; transform: scale(.35) rotate(6deg); }
+  0% { opacity: 1; transform: scale(1.035); filter: brightness(1.1); }
+  28% { opacity: 1; transform: scale(1.14); filter: brightness(1.22); }
+  55% { opacity: 1; transform: scale(1.08); filter: brightness(1.12); }
+  100% { opacity: 0; transform: scale(.28) rotate(7deg); filter: brightness(1.2); }
 }
 
 @keyframes tile-drop {
@@ -193,19 +201,22 @@ h1 { margin: 0; font-size: clamp(24px, 7vw, 34px); line-height: 1.05; }
 
 @keyframes callout {
   0% { opacity: 0; transform: translate(-50%, -35%) scale(.55) rotate(-3deg); }
-  28% { opacity: 1; transform: translate(-50%, -50%) scale(1.12) rotate(1deg); }
-  68% { opacity: 1; transform: translate(-50%, -54%) scale(1); }
+  18% { opacity: 1; transform: translate(-50%, -50%) scale(1.14) rotate(1deg); }
+  42% { opacity: 1; transform: translate(-50%, -53%) scale(1); }
+  76% { opacity: 1; transform: translate(-50%, -55%) scale(1); }
   100% { opacity: 0; transform: translate(-50%, -72%) scale(.92); }
 }
 
 @keyframes chain-pop {
   0% { transform: scale(1); }
-  45% { transform: scale(1.28) rotate(-2deg); }
+  40% { transform: scale(1.30) rotate(-2deg); }
+  72% { transform: scale(1.08); }
   100% { transform: scale(1); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tile.clearing,
+  .tile.match-ready .tile-card,
+  .tile.clearing .tile-card,
   .tile.dropping,
   .tile.spawning,
   .chain-pop,
