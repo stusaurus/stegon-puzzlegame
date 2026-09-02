@@ -47,7 +47,7 @@ h1 { margin: 0; font-size: clamp(24px, 7vw, 34px); line-height: 1.05; }
 .status-item { padding: 10px 8px; text-align: center; }
 .status-item + .status-item { border-left: 1px solid rgba(80,70,50,.12); }
 .status-item span { display: block; font-size: 11px; font-weight: 800; opacity: .6; }
-.status-item strong { display: block; margin-top: 2px; font-size: 20px; }
+.status-item strong { display: block; margin-top: 2px; font-size: 20px; transform-origin: center; }
 
 .goal-card { padding: 12px 14px; }
 .goal-label { display: block; font-size: 11px; font-weight: 900; opacity: .6; margin-bottom: 3px; }
@@ -67,6 +67,7 @@ h1 { margin: 0; font-size: clamp(24px, 7vw, 34px); line-height: 1.05; }
   border-radius: 24px;
   background: rgba(106, 91, 59, .14);
   touch-action: manipulation;
+  overflow: hidden;
 }
 .tile {
   min-width: 0;
@@ -80,22 +81,59 @@ h1 { margin: 0; font-size: clamp(24px, 7vw, 34px); line-height: 1.05; }
   cursor: pointer;
   transition: transform .14s ease, opacity .18s ease, background .18s ease;
   -webkit-tap-highlight-color: transparent;
+  will-change: transform, opacity;
 }
 .tile:active { transform: scale(.92); }
 .tile[data-type="grass"] { background: #cfe5a8; }
 .tile[data-type="berry"] { background: #f2c6bd; }
+.tile[data-type="empty"] {
+  background: rgba(255,255,255,.22);
+  box-shadow: inset 0 0 0 1px rgba(100,91,64,.06);
+}
 .tile.flipping { transform: rotateY(90deg) scale(.92); }
-.tile.clearing { opacity: 0; transform: scale(.55); }
+.tile.clearing { animation: clear-pop .22s ease forwards; }
+.tile.dropping { animation: tile-drop .28s cubic-bezier(.2,.8,.25,1) both; }
+.tile.spawning { animation: tile-spawn .26s cubic-bezier(.2,.82,.3,1) both; }
 .tile:disabled { cursor: default; }
 
-.message { min-height: 24px; margin: 0; text-align: center; font-weight: 800; font-size: 14px; }
+.message { min-height: 24px; margin: 0; text-align: center; font-weight: 800; font-size: 14px; transform-origin: center; }
 .message.success { font-size: 20px; }
+.chain-pop { animation: chain-pop .32s cubic-bezier(.2,.9,.25,1.2); }
 
 .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .button { min-height: 50px; border: 0; border-radius: 16px; font-weight: 900; font-size: 16px; }
 .button.secondary { background: #fffdf6; color: #5d5648; border: 2px solid #d8d1bd; }
 .button.primary { background: #7f9d4f; color: white; box-shadow: inset 0 -4px 0 rgba(0,0,0,.12); }
 .button:disabled { opacity: .38; box-shadow: none; }
+
+@keyframes clear-pop {
+  0% { opacity: 1; transform: scale(1); }
+  45% { opacity: 1; transform: scale(1.12); }
+  100% { opacity: 0; transform: scale(.35) rotate(6deg); }
+}
+
+@keyframes tile-drop {
+  0% { transform: translateY(var(--drop-y, -60px)) scale(.96); }
+  72% { transform: translateY(4px) scale(1.02); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes tile-spawn {
+  0% { opacity: 0; transform: translateY(-70px) scale(.9); }
+  70% { opacity: 1; transform: translateY(4px) scale(1.02); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes chain-pop {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.28) rotate(-2deg); }
+  100% { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile,
+  .chain-pop { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
 
 @media (max-height: 690px) {
   .app { gap: 9px; padding-top: max(10px, env(safe-area-inset-top)); }
