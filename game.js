@@ -4,334 +4,278 @@
   const TYPES = ["grass", "berry"];
   const ICONS = { grass: "🌿", berry: "🍓" };
   const FLIP = { grass: "berry", berry: "grass" };
+  const TIMING = { flip: 260, ripple: 40, clear: 210, drop: 270, refill: 300 };
 
-  const boardEl = document.getElementById("board");
-  const stageNumberEl = document.getElementById("stageNumber");
-  const movesLeftEl = document.getElementById("movesLeft");
-  const chainCountEl = document.getElementById("chainCount");
-  const goalTextEl = document.getElementById("goalText");
-  const goalBarEl = document.getElementById("goalBar");
-  const messageEl = document.getElementById("message");
-  const restartButton = document.getElementById("restartButton");
-  const nextButton = document.getElementById("nextButton");
+  const $ = id => document.getElementById(id);
+  const elements = {
+    board: $("board"), stage: $("stageNumber"), moves: $("movesLeft"), chain: $("chainCount"),
+    goal: $("goalText"), goalBar: $("goalBar"), message: $("message"), callout: $("chainCallout"),
+    restart: $("restartButton"), next: $("nextButton")
+  };
 
   let stageIndex = 0;
-  let stage = null;
-  let board = [];
-  let movesUsed = 0;
-  let collected = { grass: 0, berry: 0 };
-  let refillIndex = 0;
-  let busy = false;
-  let cleared = false;
+  let state;
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+  function validateStage(candidate) {
+    const required = ["id", "size", "maxMoves", "goal", "initialBoard", "refill", "mechanics", "difficulty"];
+    const missing = required.filter(key => candidate[key] === undefined);
+    if (missing.length) throw new Error(`Stage ${candidate.id || "?"}: missing ${missing.join(", ")}`);
+    if (!Number.isInteger(candidate.size) || candidate.size < 3 || candidate.size > 6) throw new Error(`Stage ${candidate.id}: invalid size`);
+    if (candidate.initialBoard.length !== candidate.size ** 2) throw new Error(`Stage ${candidate.id}: board size mismatch`);
+    if (!candidate.initialBoard.every(tile => TYPES.includes(tile))) throw new Error(`Stage ${candidate.id}: unknown tile`);
+    if (!TYPES.includes(candidate.goal.tile) || candidate.goal.type !== "collect") throw new Error(`Stage ${candidate.id}: unsupported goal`);
+    if (!candidate.refill.length || !candidate.refill.every(tile => TYPES.includes(tile))) throw new Error(`Stage ${candidate.id}: invalid refill`);
+    if (!Array.isArray(candidate.mechanics)) throw new Error(`Stage ${candidate.id}: invalid mechanics`);
+    return candidate;
+  }
 
   function loadStage(index) {
     stageIndex = Math.max(0, Math.min(index, window.STEGON_STAGES.length - 1));
-    stage = window.STEGON_STAGES[stageIndex];
-    board = [...stage.initialBoard];
-    movesUsed = 0;
-    collected = { grass: 0, berry: 0 };
-    refillIndex = 0;
-    busy = false;
-    cleared = false;
-    nextButton.disabled = true;
-    messageEl.className = "message";
-    messageEl.textContent = "パネルをタップすると、上下左右もくるりん！";
-    chainCountEl.textContent = "0";
-    render();
+    const stage = validateStage(window.STEGON_STAGES[stageIndex]);
+    state = { stage, board: [...stage.initialBoard], movesUsed: 0, collected: { grass: 0, berry: 0 }, refillIndex: 0, busy: false, cleared: false };
+    elements.next.disabled = true;
+    elements.message.className = "message";
+    elements.message.textContent = "パネルをタップすると、上下左右もくるりん！";
+    elements.chain.textContent = "0";
+    createBoard();
+    paintBoard();
   }
 
-  function render(options = {}) {
-    const { dropOffsets = null, spawnIndices = null } = options;
-
-    stageNumberEl.textContent = stage.id;
-    movesLeftEl.textContent = `${Math.max(0, stage.maxMoves - movesUsed)}手`;
-    const goalNow = collected[stage.goal.tile] || 0;
-    goalTextEl.textContent = `${ICONS[stage.goal.tile]}を ${stage.goal.count}こ あつめよう（${Math.min(goalNow, stage.goal.count)}/${stage.goal.count}）`;
-    goalBarEl.style.width = `${Math.min(100, goalNow / stage.goal.count * 100)}%`;
-
-    boardEl.style.setProperty("--size", stage.size);
-    boardEl.innerHTML = "";
-
-    board.forEach((type, index) => {
+  // The tile DOM is created once per stage. Moves only repaint content/classes,
+  // keeping 6x6 boards smooth on mobile and preserving animation continuity.
+  function createBoard() {
+    elements.board.style.setProperty("--size", state.stage.size);
+    elements.board.replaceChildren();
+    state.board.forEach((_, index) => {
       const tile = document.createElement("button");
       tile.className = "tile";
       tile.type = "button";
-      tile.dataset.type = type || "empty";
       tile.dataset.index = String(index);
       tile.setAttribute("role", "gridcell");
-      tile.setAttribute("aria-label", type === "grass" ? "草パネル" : type === "berry" ? "木の実パネル" : "空きマス");
-      tile.textContent = type ? ICONS[type] : "";
-      tile.disabled = busy || cleared || !type;
+      const card = document.createElement("span");
+      card.className = "tile-card";
+      const front = document.createElement("span");
+      front.className = "tile-face tile-front";
+      const back = document.createElement("span");
+      back.className = "tile-face tile-back";
+      card.append(front, back);
+      tile.appendChild(card);
+      tile._frontFace = front;
+      tile._backFace = back;
       tile.addEventListener("click", () => handleMove(index));
-      boardEl.appendChild(tile);
+      elements.board.appendChild(tile);
     });
+  }
 
-    const tiles = [...boardEl.querySelectorAll(".tile")];
-    const sampleTile = tiles.find(tile => tile.dataset.type !== "empty");
-    const styles = getComputedStyle(boardEl);
-    const gap = parseFloat(styles.rowGap || styles.gap) || 0;
-    const step = sampleTile ? sampleTile.getBoundingClientRect().height + gap : 0;
+  function paintBoard() {
+    const { stage, board, movesUsed, collected, busy, cleared } = state;
+    elements.stage.textContent = stage.id;
+    elements.moves.textContent = `${Math.max(0, stage.maxMoves - movesUsed)}手`;
+    const count = collected[stage.goal.tile] || 0;
+    elements.goal.textContent = `${ICONS[stage.goal.tile]}を ${stage.goal.count}こ あつめよう（${Math.min(count, stage.goal.count)}/${stage.goal.count}）`;
+    elements.goalBar.style.width = `${Math.min(100, count / stage.goal.count * 100)}%`;
+    [...elements.board.children].forEach((tile, index) => {
+      const type = board[index];
+      tile.dataset.type = type || "empty";
+      setFace(tile._frontFace, type);
+      setFace(tile._backFace, type ? FLIP[type] : null);
+      tile.disabled = busy || cleared || !type;
+      tile.setAttribute("aria-label", type === "grass" ? "草パネル" : type === "berry" ? "木の実パネル" : "空きマス");
+    });
+  }
 
-    if (dropOffsets) {
-      dropOffsets.forEach((rows, index) => {
-        const tile = tiles[index];
-        if (!tile || rows <= 0) return;
-        tile.style.setProperty("--drop-y", `${-(rows * step)}px`);
-        tile.classList.add("dropping");
-      });
-    }
-
-    if (spawnIndices) {
-      spawnIndices.forEach(index => {
-        const tile = tiles[index];
-        if (!tile) return;
-        tile.classList.add("spawning");
-      });
-    }
+  function setFace(face, type) {
+    face.dataset.type = type || "empty";
+    face.textContent = type ? ICONS[type] : "";
   }
 
   function neighbors(index) {
-    const size = stage.size;
-    const row = Math.floor(index / size);
-    const col = index % size;
-    const points = [[row, col], [row - 1, col], [row + 1, col], [row, col - 1], [row, col + 1]];
-    return points
+    const size = state.stage.size;
+    const row = Math.floor(index / size), col = index % size;
+    return [[row, col], [row - 1, col], [row + 1, col], [row, col - 1], [row, col + 1]]
       .filter(([r, c]) => r >= 0 && c >= 0 && r < size && c < size)
       .map(([r, c]) => r * size + c);
   }
 
-  function popChain(chain) {
-    chainCountEl.classList.remove("chain-pop");
-    messageEl.classList.remove("chain-pop");
-    void chainCountEl.offsetWidth;
-    chainCountEl.classList.add("chain-pop");
-    messageEl.classList.add("chain-pop");
+  async function animateFlip(indices, center) {
+    indices.forEach(index => {
+      const tile = elements.board.children[index];
+      tile.style.setProperty("--flip-delay", `${index === center ? 0 : TIMING.ripple}ms`);
+      tile.classList.add("tap-wave", "flipping");
+    });
 
-    if (chain >= 2 && navigator.vibrate) {
-      navigator.vibrate(chain >= 3 ? [25, 25, 35] : 25);
-    }
+    // Each card shows its prepared back face after 90deg. Update the logical board
+    // only once the last neighbour has crossed that edge, before matching begins.
+    await sleep(TIMING.flip / 2 + TIMING.ripple);
+    indices.forEach(index => { state.board[index] = FLIP[state.board[index]]; });
+    await sleep(TIMING.flip / 2);
+    indices.forEach(index => elements.board.children[index].classList.remove("tap-wave", "flipping"));
+    paintBoard();
   }
 
   async function handleMove(index) {
-    if (busy || cleared || movesUsed >= stage.maxMoves) return;
-    busy = true;
-    movesUsed += 1;
-    chainCountEl.textContent = "0";
-
-    const affected = neighbors(index);
-    const tiles = [...document.querySelectorAll(".tile")];
-    tiles.forEach((tile, i) => {
-      tile.disabled = true;
-      if (affected.includes(i)) {
-        tile.style.transform = "scale(1.06)";
-        tile.style.boxShadow = "0 0 0 4px rgba(255, 210, 73, .78), inset 0 -5px 0 rgba(0,0,0,.08)";
-      }
-    });
-
-    await sleep(180);
-    tiles.forEach((tile, i) => {
-      if (affected.includes(i)) {
-        tile.style.transform = "";
-        tile.style.boxShadow = "";
-        tile.classList.add("flipping");
-      }
-    });
-    await sleep(130);
-
-    affected.forEach(i => { board[i] = FLIP[board[i]]; });
-    render();
-    await sleep(130);
+    const { stage } = state;
+    if (state.busy || state.cleared || state.movesUsed >= stage.maxMoves) return;
+    state.busy = true;
+    state.movesUsed += 1;
+    elements.chain.textContent = "0";
+    paintBoard();
+    await animateFlip(neighbors(index), index);
 
     let chain = 0;
     while (true) {
       const matches = findMatches();
-      if (matches.size === 0) break;
-
+      if (!matches.size) break;
       chain += 1;
-      chainCountEl.textContent = String(chain);
-      messageEl.textContent = chain === 1 ? "けせた！" : `${chain}れんさ！`;
-      popChain(chain);
+      showChain(chain);
       await clearMatches(matches);
-
-      // 連鎖中は新しいパネルを補充しない。
-      // 残ったパネルが実際に下へ落ち、その結果で次の連鎖を判定する。
-      const dropOffsets = collapseBoard();
-      render({ dropOffsets });
-      await sleep(300);
+      const drops = collapseBoard();
+      paintBoard();
+      animateDrops(drops, chain);
+      await sleep(Math.max(180, TIMING.drop - chain * 18));
+      clearMotionClasses();
     }
 
-    // 連鎖終了後だけ補充。補充そのものでは偶然3つ揃わない。
-    if (board.some(value => value === null)) {
-      const spawnIndices = refillSafely();
-      render({ spawnIndices });
-      await sleep(270);
+    if (state.board.some(value => value === null)) {
+      const spawns = refillSafely();
+      paintBoard();
+      animateSpawns(spawns);
+      await sleep(TIMING.refill + state.stage.size * 22);
+      clearMotionClasses();
     }
 
-    if (checkClear()) {
-      cleared = true;
-      messageEl.className = "message success";
-      messageEl.textContent = "クリア！ ステゴンもうれしそう。";
-      nextButton.disabled = stageIndex >= window.STEGON_STAGES.length - 1;
-    } else if (movesUsed >= stage.maxMoves) {
-      messageEl.className = "message";
-      messageEl.textContent = "あとちょっと。やりなおしてみよう！";
-    } else if (chain === 0) {
-      messageEl.textContent = "こんどは、3つならぶ場所をさがしてみよう。";
+    if (isClear()) {
+      state.cleared = true;
+      elements.message.className = "message success";
+      elements.message.textContent = "クリア！ ステゴンもうれしそう。";
+      elements.next.disabled = stageIndex >= window.STEGON_STAGES.length - 1;
+    } else if (state.movesUsed >= stage.maxMoves) {
+      elements.message.textContent = "あとちょっと。やりなおしてみよう！";
+    } else if (!chain) {
+      elements.message.textContent = "こんどは、3つならぶ場所をさがしてみよう。";
     }
-
-    busy = false;
-    render();
+    state.busy = false;
+    paintBoard();
   }
 
-  function findMatches() {
-    const size = stage.size;
-    const matches = new Set();
-
-    for (let r = 0; r < size; r += 1) {
-      let c = 0;
-      while (c < size) {
-        const type = board[r * size + c];
-        if (!type) {
-          c += 1;
-          continue;
-        }
-
-        let end = c + 1;
-        while (end < size && board[r * size + end] === type) end += 1;
-        if (end - c >= 3) {
-          for (let x = c; x < end; x += 1) matches.add(r * size + x);
-        }
-        c = end;
+  function findMatches(board = state.board) {
+    const size = state.stage.size, matches = new Set();
+    const scan = indices => {
+      let start = 0;
+      while (start < indices.length) {
+        const type = board[indices[start]];
+        let end = start + 1;
+        while (type && end < indices.length && board[indices[end]] === type) end += 1;
+        if (type && end - start >= 3) for (let i = start; i < end; i += 1) matches.add(indices[i]);
+        start = end;
       }
+    };
+    for (let i = 0; i < size; i += 1) {
+      scan(Array.from({ length: size }, (_, c) => i * size + c));
+      scan(Array.from({ length: size }, (_, r) => r * size + i));
     }
-
-    for (let c = 0; c < size; c += 1) {
-      let r = 0;
-      while (r < size) {
-        const type = board[r * size + c];
-        if (!type) {
-          r += 1;
-          continue;
-        }
-
-        let end = r + 1;
-        while (end < size && board[end * size + c] === type) end += 1;
-        if (end - r >= 3) {
-          for (let y = r; y < end; y += 1) matches.add(y * size + c);
-        }
-        r = end;
-      }
-    }
-
     return matches;
   }
 
   async function clearMatches(matches) {
-    document.querySelectorAll(".tile").forEach((tile, index) => {
-      if (matches.has(index)) tile.classList.add("clearing");
-    });
-    await sleep(220);
-
+    matches.forEach(index => elements.board.children[index].classList.add("clearing"));
+    await sleep(TIMING.clear);
     matches.forEach(index => {
-      const type = board[index];
-      if (type) collected[type] += 1;
-      board[index] = null;
+      const type = state.board[index];
+      if (type) state.collected[type] += 1;
+      state.board[index] = null;
     });
+    paintBoard();
+    clearMotionClasses();
   }
 
   function collapseBoard() {
-    const size = stage.size;
-    const dropOffsets = new Map();
-
-    for (let c = 0; c < size; c += 1) {
-      const remaining = [];
-
-      for (let r = size - 1; r >= 0; r -= 1) {
-        const index = r * size + c;
-        const value = board[index];
-        if (value) remaining.push({ value, fromRow: r });
+    const size = state.stage.size, drops = new Map();
+    for (let col = 0; col < size; col += 1) {
+      let targetRow = size - 1;
+      for (let row = size - 1; row >= 0; row -= 1) {
+        const from = row * size + col;
+        if (!state.board[from]) continue;
+        const target = targetRow * size + col;
+        state.board[target] = state.board[from];
+        if (target !== from) { state.board[from] = null; drops.set(target, targetRow - row); }
+        targetRow -= 1;
       }
-
-      for (let r = 0; r < size; r += 1) board[r * size + c] = null;
-
-      remaining.forEach((entry, offset) => {
-        const targetRow = size - 1 - offset;
-        const targetIndex = targetRow * size + c;
-        board[targetIndex] = entry.value;
-        const rowsDropped = targetRow - entry.fromRow;
-        if (rowsDropped > 0) dropOffsets.set(targetIndex, rowsDropped);
-      });
+      while (targetRow >= 0) state.board[targetRow-- * size + col] = null;
     }
-
-    return dropOffsets;
+    return drops;
   }
 
+  function tileStep() {
+    const tile = elements.board.querySelector(".tile");
+    const styles = getComputedStyle(elements.board);
+    return (tile ? tile.getBoundingClientRect().height : 0) + (parseFloat(styles.rowGap || styles.gap) || 0);
+  }
+
+  function animateDrops(drops, chain) {
+    const step = tileStep();
+    drops.forEach((rows, index) => {
+      const tile = elements.board.children[index];
+      tile.style.setProperty("--drop-y", `${-rows * step}px`);
+      tile.style.setProperty("--motion-duration", `${Math.max(180, TIMING.drop - chain * 18)}ms`);
+      tile.classList.add("dropping");
+    });
+  }
+
+  function animateSpawns(indices) {
+    const size = state.stage.size, step = tileStep();
+    indices.forEach(index => {
+      const row = Math.floor(index / size), tile = elements.board.children[index];
+      tile.style.setProperty("--spawn-y", `${-(row + 1) * step}px`);
+      tile.style.setProperty("--spawn-delay", `${(index % size) * 24 + row * 16}ms`);
+      tile.classList.add("spawning");
+    });
+  }
+
+  // Fill all holes as one deterministic search. Unlike a per-cell fallback, this
+  // guarantees that the refill itself never starts a match when a valid fill exists.
   function refillSafely() {
-    const size = stage.size;
-    const spawnIndices = new Set();
-
-    for (let c = 0; c < size; c += 1) {
-      for (let r = size - 1; r >= 0; r -= 1) {
-        const index = r * size + c;
-        if (board[index] !== null) continue;
-
-        const preferred = nextRefill();
-        const alternate = FLIP[preferred];
-
-        if (!wouldCreateMatch(index, preferred)) {
-          board[index] = preferred;
-        } else if (!wouldCreateMatch(index, alternate)) {
-          board[index] = alternate;
-        } else {
-          board[index] = preferred;
-        }
-
-        spawnIndices.add(index);
+    const holes = state.board.map((value, index) => value === null ? index : -1).filter(index => index >= 0);
+    const preferred = holes.map((_, offset) => state.stage.refill[(state.refillIndex + offset) % state.stage.refill.length]);
+    const fill = position => {
+      if (position === holes.length) return findMatches().size === 0;
+      const index = holes[position];
+      for (const type of [preferred[position], FLIP[preferred[position]]]) {
+        state.board[index] = type;
+        if (!findMatches().size && fill(position + 1)) return true;
       }
-    }
-
-    return spawnIndices;
+      state.board[index] = null;
+      return false;
+    };
+    if (!fill(0)) holes.forEach((index, offset) => { state.board[index] = preferred[offset]; });
+    state.refillIndex += holes.length;
+    return holes;
   }
 
-  function wouldCreateMatch(index, type) {
-    const size = stage.size;
-    const row = Math.floor(index / size);
-    const col = index % size;
-    const previous = board[index];
-    board[index] = type;
-
-    let horizontal = 1;
-    for (let c = col - 1; c >= 0 && board[row * size + c] === type; c -= 1) horizontal += 1;
-    for (let c = col + 1; c < size && board[row * size + c] === type; c += 1) horizontal += 1;
-
-    let vertical = 1;
-    for (let r = row - 1; r >= 0 && board[r * size + col] === type; r -= 1) vertical += 1;
-    for (let r = row + 1; r < size && board[r * size + col] === type; r += 1) vertical += 1;
-
-    board[index] = previous;
-    return horizontal >= 3 || vertical >= 3;
+  function showChain(chain) {
+    elements.chain.textContent = String(chain);
+    elements.message.textContent = chain === 1 ? "けせた！" : `${chain}れんさ！`;
+    elements.callout.textContent = chain === 1 ? "NICE!" : `${chain}れんさ！`;
+    elements.callout.dataset.level = String(Math.min(chain, 4));
+    elements.callout.classList.remove("show");
+    void elements.callout.offsetWidth;
+    elements.callout.classList.add("show");
+    elements.chain.classList.remove("chain-pop");
+    void elements.chain.offsetWidth;
+    elements.chain.classList.add("chain-pop");
+    if (chain >= 2 && navigator.vibrate) navigator.vibrate(chain >= 4 ? [25, 20, 35] : chain >= 3 ? 35 : 22);
   }
 
-  function nextRefill() {
-    if (stage.refill && stage.refill.length) {
-      const value = stage.refill[refillIndex % stage.refill.length];
-      refillIndex += 1;
-      return value;
-    }
-
-    const value = TYPES[refillIndex % TYPES.length];
-    refillIndex += 1;
-    return value;
+  function clearMotionClasses() {
+    elements.board.querySelectorAll(".tile").forEach(tile => {
+      tile.classList.remove("clearing", "dropping", "spawning");
+      tile.style.removeProperty("--motion-duration");
+    });
   }
 
-  function checkClear() {
-    return (collected[stage.goal.tile] || 0) >= stage.goal.count;
-  }
-
-  restartButton.addEventListener("click", () => loadStage(stageIndex));
-  nextButton.addEventListener("click", () => loadStage(stageIndex + 1));
-
+  function isClear() { return state.collected[state.stage.goal.tile] >= state.stage.goal.count; }
+  elements.restart.addEventListener("click", () => loadStage(stageIndex));
+  elements.next.addEventListener("click", () => loadStage(stageIndex + 1));
   loadStage(0);
 })();
